@@ -5,6 +5,7 @@ from selenium import webdriver
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 import os
+import json
 
 
 class LinkedInScraper:
@@ -41,6 +42,7 @@ class LinkedInScraper:
         driver.get("https://www.linkedin.com/login")
         driver.find_element(By.ID, "username").send_keys(self.config["username"])
         driver.find_element(By.ID, "password").send_keys(self.config["password"])
+        time.sleep(2)
         driver.find_element(By.XPATH, "//*[@type='submit']").click()
 
     def load_existing_data(self):
@@ -63,7 +65,7 @@ class LinkedInScraper:
         search = BeautifulSoup(driver.page_source, "lxml")
         peoples = search.findAll("div", class_="mb1")
 
-        new_profiles = 0
+        new_profiles = []
         for people in peoples:
             profile_link = people.find("a", class_="app-aware-link")
             if profile_link:
@@ -77,26 +79,50 @@ class LinkedInScraper:
                     location = (
                         location_div.get_text(strip=True) if location_div else "None"
                     )
-                    self.data = self.data.append(
+
+                    # Collect new profile data in a dictionary
+                    new_profiles.append(
                         {
                             "profile_url": profile_url,
                             "name": name,
                             "location": location,
-                        },
-                        ignore_index=True,
+                        }
                     )
-                    new_profiles += 1
 
-        print(f"Data scraped successfully! {new_profiles} new profiles added.")
-        return new_profiles
+        # Concatenate new profiles to the existing DataFrame
+        if new_profiles:
+            new_data = pd.DataFrame(new_profiles)
+            self.data = pd.concat([self.data, new_data], ignore_index=True)
+
+        print(f"Data scraped successfully! {len(new_profiles)} new profiles added.")
+        return len(new_profiles)
+
+    def load_cookies(self, driver):
+        # Load cookies from a JSON file or a string
+        with open("cookies.json", "r") as f:
+            cookies = json.load(f)
+        for name, value in cookies.items():
+            print(name, value)
+            driver.add_cookie({"name": name, "value": value})
 
     def scrape_data(self):
         driver = webdriver.Safari()
+        driver.get("https://www.linkedin.com")  # Go to LinkedIn to set up the session
+        time.sleep(2)  # Wait for the page to load
         self.login(driver)
+        # Load cookies after manual login
+        print("Loading cookies")
+        self.load_cookies(driver)
+
+        # Refresh the page to apply cookies
+        driver.refresh()
 
         try:
-            for page_number in range(1, 100):
+            for page_number in range(1, 101):
                 self.scrape_page(driver, page_number)
+                if page_number % 10 == 5:
+                    print(f"Saved data at page {page_number}")
+                    self.write_data()
         except Exception as e:
             print(f"An error occurred: {e}. Exiting gracefully.")
         finally:
